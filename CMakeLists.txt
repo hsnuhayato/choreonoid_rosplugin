@@ -8,8 +8,6 @@ if(NOT CMAKE_BUILD_TYPE)
     FORCE)
 endif()
 
-add_compile_options(-std=c++11)
-
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
@@ -17,6 +15,13 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   choreonoid
   )
+
+if(CHOREONOID_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD ${CHOREONOID_CXX_STANDARD})
+  set(CMAKE_CXX_EXTENSIONS OFF)
+else()
+  add_compile_options(-std=c++11)
+endif()
 
 add_definitions(${CHOREONOID_DEFINITIONS})
 
