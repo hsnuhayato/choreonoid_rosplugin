@@ -1,6 +1,7 @@
 #include "BodyPublisherItem.h"
 #include <cnoid/BodyItem>
 #include <cnoid/Camera>
+#include <cnoid/RangeSensor>
 #include <cnoid/ItemManager>
 #include <cnoid/TimeBar>
 #include <cnoid/Archive>
@@ -8,6 +9,7 @@
 #include <ros/node_handle.h>
 #include <sensor_msgs/JointState.h>
 #include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/LaserScan.h>
 #include <image_transport/image_transport.h>
 #include <memory>
 #include "gettext.h"
@@ -38,6 +40,9 @@ public:
 
     DeviceList<Camera> cameras;
     vector<image_transport::Publisher> cameraImagePublishers;
+
+    DeviceList<RangeSensor> range_sensors;
+    vector<ros::Publisher> rangeSensorPublishers;
     
     BodyNode(BodyItem* bodyItem);
 
@@ -52,6 +57,7 @@ public:
     void initializeJointState(Body* body);
     void publishJointState(Body* body, double time);
     void publishCameraImage(int index);
+    void publishRangeSensorData(int index);
 };
 
 }
@@ -247,6 +253,13 @@ BodyNode::BodyNode(BodyItem* bodyItem)
         auto camera = cameras[i];
         cameraImagePublishers[i] = it.advertise(camera->name() + "/image", 1);
     }
+
+    range_sensors.assign(devices.extract<RangeSensor>());
+    rangeSensorPublishers.resize(range_sensors.size());
+    for (size_t i=0; i < range_sensors.size(); ++i) {
+      auto sensor = range_sensors[i];
+      rangeSensorPublishers[i] = rosNode->advertise<sensor_msgs::LaserScan>(sensor->name() + "/scan", 1);
+    }
 }
 
 
@@ -270,6 +283,14 @@ void BodyNode::start(ControllerIO* io, double maxPublishRate)
         sensorConnections.add(
             camera->sigStateChanged().connect(
                 [&, i](){ publishCameraImage(i); }));
+    }
+
+    range_sensors.assign(devices.extract<RangeSensor>());
+    for(size_t i=0; i < range_sensors.size(); ++i){
+        auto sensor = range_sensors[i];
+        sensorConnections.add(
+            sensor->sigStateChanged().connect(
+                [&, i](){ publishRangeSensorData(i); }));
     }
 }
 
@@ -370,4 +391,28 @@ void BodyNode::publishCameraImage(int index)
     image.data.resize(image.step * image.height);
     std::memcpy(&(image.data[0]), &(camera->image().pixels()[0]), image.step * image.height);
     cameraImagePublishers[index].publish(image);
+}
+
+void BodyNode::publishRangeSensorData(int index)
+{
+    auto sensor = range_sensors[index];
+    sensor_msgs::LaserScan range;
+    range.header.stamp.fromSec(time);
+    range.header.frame_id = sensor->name();
+    range.range_max = sensor->maxDistance();
+    range.range_min = sensor->minDistance();
+    if (sensor->yawRange() == 0.0) {
+      range.angle_max = sensor->pitchRange()/2.0;
+      range.angle_min = -sensor->pitchRange()/2.0;
+      range.angle_increment = sensor->pitchStep();
+    } else {
+      range.angle_max = sensor->yawRange()/2.0;
+      range.angle_min = -sensor->yawRange()/2.0;
+      range.angle_increment = sensor->yawStep();
+    }
+    range.ranges.resize(sensor->rangeData().size());
+    for (size_t j = 0; j < sensor->rangeData().size(); ++j) {
+      range.ranges[j] = sensor->rangeData()[j];
+    }
+    rangeSensorPublishers[index].publish(range);
 }
